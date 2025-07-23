@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin Lisensi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>🔐 Panel Admin Lisensi</h1>
+
+    <form action="/admin/add" method="POST" class="add-form">
+      <button type="submit" class="add-btn">➕ Tambah Lisensi Baru</button>
+    </form>
+
+    <div class="table-responsive">
+      <table>
+        <thead>
+          <tr>
+            <th>Kode Lisensi</th>
+            <th>Status</th>
+            <th>Digunakan</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% licenses.forEach(lic => { %>
+            <tr>
+              <td><%= lic.key %></td>
+              <td>
+                <span class="<%= lic.active ? 'badge-active' : 'badge-inactive' %>">
+                  <%= lic.active ? 'Aktif' : 'Nonaktif' %>
+                </span>
+              </td>
+              <td>
+                <span class="<%= lic.used ? 'badge-used' : 'badge-unused' %>">
+                  <%= lic.used ? 'Sudah' : 'Belum' %>
+                </span>
+              </td>
+              <td>
+                <form method="POST" action="/admin/toggle">
+                  <input type="hidden" name="key" value="<%= lic.key %>">
+                  <button class="toggle-btn" type="submit">🔄 Toggle</button>
+                </form>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>
