@@ -7,10 +7,9 @@ const PORT = 3000;
 require('dotenv').config();
 const admin = require('firebase-admin');
 
-// Ambil dari ENV dan ubah newline literal (\\n → \n)
-const rawConfig = process.env.FIREBASE_CONFIG.replace(/\\n/g, '\n');
-console.log("RAW:", rawConfig); // opsional untuk debug
-const serviceAccount = JSON.parse(rawConfig); // <== INI PENTING!
+// Parsing dan perbaiki karakter newline
+const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
