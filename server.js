@@ -1,107 +1,162 @@
 const express = require('express');
-const fs = require('fs');
+const cors = require('cors');
+const admin = require('firebase-admin');
 const path = require('path');
 
 const app = express();
 const PORT = 3000;
-const LICENSE_PATH = path.join(__dirname, 'data', 'licenses.json');
 
-// View engine
-app.set('view engine', 'ejs');
+// 🔧 Inisialisasi Firebase
+const serviceAccount = require('./firebase-config.json');
 
-// Static assets
-app.use(express.static('public'));
-
-// Middleware untuk parsing form dan JSON
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json()); // Penting untuk API
-
-// Fungsi Load dan Save Lisensi
-function loadLicenses() {
-  if (!fs.existsSync(LICENSE_PATH)) return [];
-  return JSON.parse(fs.readFileSync(LICENSE_PATH, 'utf-8'));
-}
-
-function saveLicenses(data) {
-  fs.writeFileSync(LICENSE_PATH, JSON.stringify(data, null, 2));
-}
-
-// Halaman Panel Admin
-app.get('/admin', (req, res) => {
-  const licenses = loadLicenses();
-  res.render('index', { licenses });
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: 'https://fbuses-3e232-default-rtdb.firebaseio.com' // Ganti dengan URL database Anda
 });
 
-// 🔒 API: Verifikasi Lisensi
-app.post('/verify-license', (req, res) => {
-  const { licenseKey } = req.body;
+const db = admin.database();
+const licenseRef = db.ref('licenses');
 
+// 🛠 Middleware
+app.use(cors());
+app.use(express.static('public'));
+app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
+
+// 🧠 Fungsi Load dan Save Lisensi ke Firebase
+async function loadLicenses() {
+  const snapshot = await licenseRef.once('value');
+  const data = snapshot.val();
+  return data ? Object.values(data) : [];
+}
+
+async function saveLicenseObject(licenseObj) {
+  await licenseRef.child(licenseObj.key).set(licenseObj);
+}
+
+// 🔍 Ambil semua lisensi
+app.get('/admin/api', async (req, res) => {
+  try {
+    const licenses = await loadLicenses();
+    res.json(licenses);
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Gagal memuat data', error: err.message });
+  }
+});
+
+// 🔁 Toggle status lisensi
+app.post('/admin/toggle', async (req, res) => {
+  const { key } = req.body;
+  const snapshot = await licenseRef.child(key).once('value');
+  if (!snapshot.exists()) {
+    return res.status(404).json({ success: false, message: 'Lisensi tidak ditemukan' });
+  }
+
+  const data = snapshot.val();
+  data.active = !data.active;
+  await licenseRef.child(key).set(data);
+
+  res.json({ success: true, message: 'Status lisensi diubah', key: key });
+});
+
+// ➕ Tambah lisensi baru
+function generateLicenseKey() {
+  const part = () => Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${part()}-${part()}-${part()}`;
+}
+
+app.post('/admin/add', async (req, res) => {
+  let newKey;
+  let exists = true;
+  let attempt = 0;
+
+  while (exists && attempt < 10) {
+    newKey = generateLicenseKey();
+    const snapshot = await licenseRef.child(newKey).once('value');
+    exists = snapshot.exists();
+    attempt++;
+  }
+
+  if (exists) return res.status(500).json({ success: false, message: 'Gagal membuat lisensi unik' });
+
+  const newLicense = { key: newKey, active: true, used: false };
+  await licenseRef.child(newKey).set(newLicense);
+
+  res.json({ success: true, message: 'Lisensi berhasil ditambahkan', license: newLicense });
+});
+
+// 🔒 Verifikasi lisensi
+app.post('/verify-license', async (req, res) => {
+  const { licenseKey } = req.body;
   if (!licenseKey) {
     return res.status(400).json({ success: false, message: 'License key kosong' });
   }
 
-  const keyTrimmed = licenseKey.trim();
-  const licenses = loadLicenses();
-  const license = licenses.find(l => l.key === keyTrimmed);
+  const key = licenseKey.trim();
+  const snapshot = await licenseRef.child(key).once('value');
 
-  if (!license) return res.status(400).json({ success: false, message: 'Lisensi tidak ditemukan' });
+  if (!snapshot.exists()) return res.status(400).json({ success: false, message: 'Lisensi tidak ditemukan' });
 
-  if (!license.active) {
-    return res.status(403).json({ success: false, message: 'Lisensi tidak aktif' });
-  }
+  const lic = snapshot.val();
 
-  if (license.used) {
-    return res.status(409).json({ success: false, message: 'Lisensi sudah digunakan' });
-  }
+  if (!lic.active) return res.status(403).json({ success: false, message: 'Lisensi tidak aktif' });
+  if (lic.used) return res.status(409).json({ success: false, message: 'Lisensi sudah digunakan' });
 
-// Jika lolos semua, tandai sebagai digunakan
-  license.used = true;
-  saveLicenses(licenses);
+  lic.used = true;
+  await licenseRef.child(key).set(lic);
 
-// Kirim info lengkap jika ingin diproses di Electron
-  res.json({ success: true, key: license.key });
-
+  res.json({ success: true, key: key });
 });
 
-// 🔁 Toggle Status Aktif
-app.post('/admin/toggle', (req, res) => {
+// 🗑️ Hapus Lisensi
+app.post('/admin/delete', async (req, res) => {
   const { key } = req.body;
-  const licenses = loadLicenses();
-  const lic = licenses.find(l => l.key === key.trim());
-  if (lic) {
-    lic.active = !lic.active;
-    saveLicenses(licenses);
+  const ref = licenseRef.child(key);
+  const snapshot = await ref.once('value');
+
+  if (!snapshot.exists()) {
+    return res.status(404).json({ success: false, message: 'Lisensi tidak ditemukan' });
   }
-  res.redirect('/admin');
+
+  await ref.remove();
+  res.json({ success: true, message: 'Lisensi berhasil dihapus', key });
 });
 
-// ➕ Tambah Lisensi
-// Fungsi pembuat kode lisensi acak
-function generateLicenseKey() {
-  const part = () => Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `${part()}-${part()}-${part()}`; // Contoh: X8GJ-PQL2-ZK7W
-}
+// 🔄 Reset "used" ke false
+app.post('/admin/reset', async (req, res) => {
+  const { key } = req.body;
+  const ref = licenseRef.child(key);
+  const snapshot = await ref.once('value');
 
-app.post('/admin/add', (req, res) => {
-  const licenses = loadLicenses();
+  if (!snapshot.exists()) {
+    return res.status(404).json({ success: false, message: 'Lisensi tidak ditemukan' });
+  }
 
-  let newKey;
-  let attempt = 0;
-  do {
-    newKey = generateLicenseKey();
-    attempt++;
-  } while (licenses.some(l => l.key === newKey) && attempt < 10);
+  const data = snapshot.val();
+  data.used = false;
+  await ref.set(data);
 
-  if (!newKey) return res.redirect('/admin');
+  res.json({ success: true, message: 'Status lisensi direset', key });
+});
 
-  licenses.push({ key: newKey, active: true, used: false });
-  saveLicenses(licenses);
+app.post('/admin/check-valid', async (req, res) => {
+  const { key } = req.body;
+  const licenses = await loadLicenses(); // ✅ Gunakan await
+  const lic = licenses.find(l => l.key === key);
 
-  res.redirect('/admin');
+  if (!lic) return res.json({ valid: false, reason: 'Lisensi tidak ditemukan' });
+  if (!lic.active) return res.json({ valid: false, reason: 'Lisensi tidak aktif' });
+
+  return res.json({ valid: true });
 });
 
 
-// Start server
+// 🔧 Health check
+app.get('/', (req, res) => {
+  res.send('🚀 Server Firebase Lisensi berjalan. Gunakan endpoint /admin/api');
+});
+
+// ✅ Start server
 app.listen(PORT, () => {
-  console.log(`✅ Server berjalan di http://localhost:${PORT}/admin`);
+  console.log(`✅ Server berjalan di http://localhost:${PORT}`);
 });
