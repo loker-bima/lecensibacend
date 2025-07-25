@@ -5,9 +5,11 @@ const path = require('path');
 
 const app = express();
 const PORT = 3000;
+require('dotenv').config();
+
 
 // 🔧 Inisialisasi Firebase
-const serviceAccount = require('./firebase-config.json');
+const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
