@@ -19,6 +19,7 @@ admin.initializeApp({
 
 const db = admin.database();
 const licenseRef = db.ref('licenses');
+module.exports = admin;
 
 // 🛠 Middleware
 app.use(cors());
