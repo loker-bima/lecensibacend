@@ -1,20 +1,22 @@
 const express = require('express');
 const cors = require('cors');
-const admin = require('firebase-admin');
 const path = require('path');
 
 const app = express();
 const PORT = 3000;
 require('dotenv').config();
+const admin = require('firebase-admin');
 
-
-// 🔧 Inisialisasi Firebase
-const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+// Ambil dari ENV dan ubah newline literal (\\n → \n)
+const rawConfig = process.env.FIREBASE_CONFIG.replace(/\\n/g, '\n');
+console.log("RAW:", rawConfig); // opsional untuk debug
+const serviceAccount = JSON.parse(rawConfig); // <== INI PENTING!
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  databaseURL: 'https://fbuses-3e232-default-rtdb.firebaseio.com' // Ganti dengan URL database Anda
+  databaseURL: 'https://fbuses-3e232-default-rtdb.firebaseio.com',
 });
+
 
 const db = admin.database();
 const licenseRef = db.ref('licenses');
